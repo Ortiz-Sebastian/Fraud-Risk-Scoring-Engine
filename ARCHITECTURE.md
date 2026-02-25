@@ -37,7 +37,7 @@ It is designed to demonstrate:
                              │
                              ▼
            ┌────────────────────────────────┐
-           │  Spark Structured Streaming     │
+           │  Flink DataStream API           │
            │  Fraud & Risk Engine            │
            │                                 │
            │  • Velocity Windows             │
@@ -80,7 +80,7 @@ Clear boundaries prevent incorrect assumptions and improve reasoning about failu
 - No direct DB writes
 - Only publish to Kafka topic
 
-### B. Kafka → Spark Streaming
+### B. Kafka → Flink
 
 **Responsibility**
 - Durable event buffer
@@ -88,11 +88,11 @@ Clear boundaries prevent incorrect assumptions and improve reasoning about failu
 - Offset management
 
 **Boundary**
-- Spark reads from Kafka using consumer groups
+- Flink reads from Kafka using the Flink Kafka connector
 - No synchronous coupling
 - Replay is handled via offset reset
 
-### C. Spark Streaming (Core Processing Layer)
+### C. Flink DataStream (Core Processing Layer)
 
 **Responsibility**
 - Stateful risk evaluation
@@ -103,7 +103,7 @@ Clear boundaries prevent incorrect assumptions and improve reasoning about failu
 - Checkpointing state
 
 **Boundary**
-- Spark does NOT directly call external systems
+- Flink does NOT directly call external systems during stream processing
 - Only writes to sinks
 - Uses checkpoint directory for recovery
 
@@ -133,7 +133,7 @@ Each sink has a clear, isolated purpose.
 ### E. Observability Layer
 
 - Kafka consumer lag
-- Spark micro-batch duration
+- Flink checkpoint duration
 - State store size
 - Risk flag rate
 - Throughput per partition
@@ -148,7 +148,7 @@ Each sink has a clear, isolated purpose.
 
 1. Producer generates transaction event
 2. Event published to Kafka
-3. Spark consumes event
+3. Flink consumes event
 4. Apply:
    - Deduplication
    - Window aggregations
@@ -197,9 +197,10 @@ Why:
 
 ### State Management
 
-- Spark state store
+- Flink state backend (RocksDB)
 - Watermarks for late events
 - Checkpoint directory for recovery
+- Savepoints for planned upgrades
 
 ---
 
@@ -207,10 +208,10 @@ Why:
 
 | Failure Type       | Mitigation                                          |
 | ------------------ | --------------------------------------------------- |
-| Spark crash        | Restart from checkpoint; resume from last offset    |
+| Flink TaskManager crash | Restart from checkpoint; resume from last offset |
 | Duplicate events   | Deduplicate using `event_id`                        |
 | Sink failure       | Retry with exponential backoff; idempotent writes   |
-| Kafka backpressure | Tune `maxRatePerPartition`; monitor lag; scale executors |
+| Kafka backpressure | Flink back-pressure mechanism; monitor lag; scale parallelism |
 
 ---
 
@@ -218,7 +219,7 @@ Why:
 
 True global exactly-once across multiple sinks is complex. This system achieves:
 
-- Exactly-once read (Kafka offsets + checkpointing)
+- Exactly-once read (Kafka offsets + Flink checkpointing)
 - Idempotent writes per sink
 - Deduplication by `event_id`
 - Deterministic risk computation
@@ -229,8 +230,8 @@ True global exactly-once across multiple sinks is complex. This system achieves:
 
 **Horizontal scaling via:**
 - Increasing Kafka partitions
-- Increasing Spark executors
-- Scaling worker nodes
+- Increasing Flink task parallelism
+- Scaling TaskManager slots
 - Stateless producer scaling
 
 **State grows proportional to:**
@@ -242,10 +243,10 @@ True global exactly-once across multiple sinks is complex. This system achieves:
 
 ## 10. Deployment Boundaries
 
-| Environment | Stack                                     |
-| ----------- | ----------------------------------------- |
-| Development | Docker Compose                            |
-| Production  | Kubernetes, external Kafka, S3 checkpoint |
+| Environment | Stack                                          |
+| ----------- | ---------------------------------------------- |
+| Development | Docker Compose                                 |
+| Production  | Kubernetes, external Kafka, S3/GCS checkpoint  |
 
 ---
 

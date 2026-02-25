@@ -52,7 +52,7 @@ public final class AppConfig {
         return "http://" + host + ":" + port;
     }
 
-    public static String sparkCheckpointDir() {
-        return get("SPARK_CHECKPOINT_DIR", "./checkpoint");
+    public static String flinkCheckpointDir() {
+        return get("FLINK_CHECKPOINT_DIR", "./checkpoint");
     }
 }

@@ -5,7 +5,7 @@
         </encoder>
     </appender>
 
-    <logger name="org.apache.spark" level="WARN"/>
+    <logger name="org.apache.flink" level="WARN"/>
     <logger name="org.apache.kafka" level="WARN"/>
 
     <root level="INFO">

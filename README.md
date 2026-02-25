@@ -2,7 +2,7 @@
 
 A distributed, fault-tolerant streaming platform that processes high-volume transaction events in real-time to compute dynamic risk scores and detect fraud patterns.
 
-Built using **Apache Kafka** and **Spark Structured Streaming**, this system demonstrates production-grade distributed systems engineering including stateful stream processing, windowed aggregations, hot-key mitigation, replay capability, and multi-sink consistency.
+Built using **Apache Kafka** and **Apache Flink**, this system demonstrates production-grade distributed systems engineering including stateful stream processing, windowed aggregations, hot-key mitigation, replay capability, and multi-sink consistency.
 
 > **Note:** This is not just a dashboard — it is a replayable, fault-tolerant streaming risk engine.
 
@@ -39,7 +39,7 @@ This project demonstrates distributed platform engineering by implementing:
             │
             ▼
  ┌────────────────────────┐
- │ Spark Structured       │
+ │ Flink DataStream       │
  │ Streaming Risk Engine  │
  │                        │
  │ • Velocity Rules       │
@@ -113,7 +113,7 @@ Each transaction produces:
 
 ### Exactly-Once Processing
 
-- Kafka offsets + Spark checkpointing
+- Kafka offsets + Flink checkpointing
 - Idempotent upserts to PostgreSQL
 - Deduplication using `event_id`
 
@@ -133,17 +133,17 @@ Each transaction produces:
 
 ## Tech Stack
 
-| Component         | Technology                              |
-| ----------------- | --------------------------------------- |
-| Stream Processing | Apache Spark 3.5 (Structured Streaming) |
-| Message Broker    | Apache Kafka 3.6                        |
-| Storage           | PostgreSQL 15                           |
-| Cache             | Redis 7                                 |
-| Search            | Elasticsearch 8                         |
-| Monitoring        | Prometheus + Grafana                    |
-| Containerization  | Docker                                  |
-| Orchestration     | Kubernetes (optional)                   |
-| Language          | Python 3.11                             |
+| Component         | Technology                        |
+| ----------------- | --------------------------------- |
+| Stream Processing | Apache Flink 1.20 (DataStream API)|
+| Message Broker    | Apache Kafka 3.7                  |
+| Storage           | PostgreSQL 15                     |
+| Cache             | Redis 7                           |
+| Search            | Elasticsearch 8                   |
+| Monitoring        | Prometheus + Grafana              |
+| Containerization  | Docker                            |
+| Orchestration     | Kubernetes (optional)             |
+| Language          | Java 21                           |
 
 ---
 
@@ -181,13 +181,13 @@ Each transaction produces:
 
 ## Performance Benchmarks
 
-| Metric                     | Value                 |
-| -------------------------- | --------------------- |
+| Metric                     | Value                     |
+| -------------------------- | ------------------------- |
 | Throughput                 | 10K+ events/sec sustained |
-| End-to-end latency (p99)   | < 150ms               |
-| Consumer lag               | < 500ms steady state  |
-| State store size           | 2–4GB under load      |
-| Replay recomputation speed | 2M events/min         |
+| End-to-end latency (p99)   | < 150ms                   |
+| Consumer lag               | < 500ms steady state      |
+| State store size           | 2–4GB under load          |
+| Replay recomputation speed | 2M events/min             |
 
 ---
 
@@ -196,39 +196,40 @@ Each transaction produces:
 ### Metrics Collected
 
 - Kafka consumer lag
-- Spark micro-batch duration
+- Flink checkpoint duration
 - State store memory usage
 - Risk flag rate
 - Throughput by partition
-- Executor utilization
+- TaskManager utilization
 
 ### Alerts
 
 - Consumer lag > threshold
 - Risk spike anomaly
 - State growth beyond expected bounds
-- Failed batch retries
+- Failed checkpoint retries
 
 ---
 
 ## Project Structure
 
 ```
-realtime-fraud-risk-engine/
-├── src/
-│   ├── producer/
-│   │   ├── transaction_generator.py
-│   │   └── attack_modes.py
-│   ├── risk_engine/
-│   │   ├── streaming_job.py
-│   │   ├── risk_rules.py
-│   │   ├── state_management.py
-│   │   └── sinks.py
-│   ├── config/
-│   └── monitoring/
+fraud-risk-engine/
+├── common/
+│   └── src/main/java/com/riskengine/common/
+│       ├── model/          # TransactionEvent, RiskScore
+│       └── config/         # AppConfig
+├── producer/
+│   └── src/main/java/com/riskengine/producer/
+│       └── TransactionProducer.java
+├── risk-engine/
+│   └── src/main/java/com/riskengine/engine/
+│       └── StreamingJob.java
+├── api/
+│   └── src/main/java/com/riskengine/api/
+│       └── ApiApplication.java
 ├── docker/
 ├── kubernetes/
-├── tests/
 ├── grafana/
 ├── docs/
 └── README.md

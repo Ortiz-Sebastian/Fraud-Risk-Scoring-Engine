@@ -9,6 +9,6 @@ public class StreamingJob {
 
     public static void main(String[] args) {
         log.info("Risk Engine Streaming Job starting...");
-        // TODO: Implement Spark Structured Streaming pipeline
+        // TODO: Implement Flink DataStream pipeline
     }
 }
