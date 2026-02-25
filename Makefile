@@ -1,20 +1,13 @@
-.PHONY: install test lint format infra-up infra-down clean
+.PHONY: build test clean infra-up infra-down infra-reset run-producer run-engine run-api
 
-install:
-	pip install -r requirements.txt
+build:
+	./gradlew build
 
 test:
-	pytest
+	./gradlew test
 
-test-cov:
-	pytest --cov=src --cov-report=term-missing
-
-lint:
-	ruff check src/ tests/
-
-format:
-	black src/ tests/
-	ruff check --fix src/ tests/
+clean:
+	./gradlew clean
 
 infra-up:
 	docker compose up -d
@@ -26,7 +19,11 @@ infra-reset:
 	docker compose down -v
 	docker compose up -d
 
-clean:
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .pytest_cache -exec rm -rf {} +
-	rm -rf .coverage htmlcov/
+run-producer:
+	./gradlew :producer:run
+
+run-engine:
+	./gradlew :risk-engine:run
+
+run-api:
+	./gradlew :api:bootRun

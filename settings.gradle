@@ -1,0 +1,6 @@
+rootProject.name = 'fraud-risk-engine'
+
+include 'common'
+include 'producer'
+include 'risk-engine'
+include 'api'

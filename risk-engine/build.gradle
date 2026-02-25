@@ -1,0 +1,26 @@
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'com.riskengine.engine.StreamingJob'
+}
+
+dependencies {
+    implementation project(':common')
+
+    implementation "org.apache.spark:spark-core_2.13:${sparkVersion}"
+    implementation "org.apache.spark:spark-sql_2.13:${sparkVersion}"
+    implementation "org.apache.spark:spark-streaming_2.13:${sparkVersion}"
+    implementation "org.apache.spark:spark-sql-kafka-0-10_2.13:${sparkVersion}"
+
+    implementation "org.postgresql:postgresql:${postgresDriverVersion}"
+    implementation "redis.clients:jedis:${jedisVersion}"
+    implementation "co.elastic.clients:elasticsearch-java:${elasticsearchVersion}"
+    implementation "io.prometheus:simpleclient:${prometheusVersion}"
+    implementation "io.prometheus:simpleclient_httpserver:${prometheusVersion}"
+
+    implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+    implementation "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${jacksonVersion}"
+    implementation "org.slf4j:slf4j-api:${slf4jVersion}"
+}

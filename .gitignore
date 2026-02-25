@@ -1,33 +1,27 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-*.egg
-dist/
+# Gradle
+.gradle/
 build/
-.eggs/
-
-# Virtual environments
-venv/
-.venv/
-env/
+!gradle/wrapper/gradle-wrapper.jar
 
 # IDE
-.vscode/
 .idea/
-*.swp
-*.swo
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+bin/
+
+# Java
+*.class
+*.jar
+*.war
+hs_err_pid*
 
 # Environment
 .env
-
-# Pytest
-.pytest_cache/
-htmlcov/
-.coverage
-coverage.xml
 
 # Spark
 spark-warehouse/
