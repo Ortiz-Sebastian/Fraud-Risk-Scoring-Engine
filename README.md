@@ -48,19 +48,31 @@ This project demonstrates distributed platform engineering by implementing:
  │ • Stateful Tracking    │
  └──────────┬─────────────┘
             │
-            ▼
-     ┌─────────────────────┐
-     │ Output Sinks        │
-     ├─────────────────────┤
-     │ • PostgreSQL        │
-     │ • Redis             │
-     │ • Elasticsearch     │
-     │ • Prometheus        │
-     └──────────┬──────────┘
-                ▼
-       ┌──────────────────┐
-       │ Grafana Dashboards│
-       └──────────────────┘
+     ┌──────┴────────────────────────┐
+     ▼                               ▼
+┌─────────────────┐         ┌────────────────┐
+│   Cassandra     │         │     Redis      │
+│ (event + score  │         │  (hot flags,   │
+│  durable store) │         │  real-time     │
+└────────┬────────┘         │  cache)        │
+         │                  └───────┬────────┘
+         ▼                          │
+┌─────────────────┐                 │
+│  Elasticsearch  │                 │
+│  (audit trail)  │                 │
+└────────┬────────┘                 │
+         │                          │
+         ▼                          ▼
+┌─────────────────────────────────────┐
+│          Spring Boot API            │
+│    (reads PostgreSQL for queries)   │
+└────────────────┬────────────────────┘
+                 │
+                 ▼
+        ┌────────────────┐
+        │   Prometheus   │
+        │   + Grafana    │
+        └────────────────┘
 ```
 
 ---
@@ -123,18 +135,19 @@ Each transaction produces:
 
 ## Tech Stack
 
-| Component         | Technology                         |
-| ----------------- | ---------------------------------- |
-| Stream Processing | Apache Flink 1.20 (DataStream API) |
-| Message Broker    | Apache Kafka 3.7                   |
-| Storage           | PostgreSQL 15                      |
-| Cache             | Redis 7                            |
-| Search            | Elasticsearch 8                    |
-| Monitoring        | Prometheus + Grafana               |
-| Containerization  | Docker                             |
-| Orchestration     | Kubernetes (optional)              |
-| Language          | Java 21                            |
-| Build Tool        | Gradle 9                           |
+| Component               | Technology                         | Role |
+| ----------------------- | ---------------------------------- | ---- |
+| Stream Processing       | Apache Flink 1.20 (DataStream API) | Core fraud detection engine |
+| Message Broker          | Apache Kafka 3.7                   | Event ingestion + replay bus |
+| Streaming Store         | Apache Cassandra 4.1               | High-throughput Flink sink; event + score storage |
+| Relational Store        | PostgreSQL 15                      | API query layer (Spring JPA) |
+| Cache                   | Redis 7                            | Real-time hot flags, low-latency API reads |
+| Search                  | Elasticsearch 8                    | Audit trail + fraud investigation |
+| Monitoring              | Prometheus + Grafana               | Metrics and dashboards |
+| Containerization        | Docker                             | Local development stack |
+| Orchestration           | Kubernetes (optional)              | Production deployment |
+| Language                | Java 21                            | All modules |
+| Build Tool              | Gradle 9                           | Multi-module build |
 
 ---
 

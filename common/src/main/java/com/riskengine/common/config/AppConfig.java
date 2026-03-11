@@ -52,6 +52,18 @@ public final class AppConfig {
         return "http://" + host + ":" + port;
     }
 
+    public static String cassandraHost() {
+        return get("CASSANDRA_HOST", "localhost");
+    }
+
+    public static int cassandraPort() {
+        return getInt("CASSANDRA_PORT", 9042);
+    }
+
+    public static String cassandraKeyspace() {
+        return get("CASSANDRA_KEYSPACE", "fraud_engine");
+    }
+
     public static String flinkCheckpointDir() {
         return get("FLINK_CHECKPOINT_DIR", "./checkpoint");
     }

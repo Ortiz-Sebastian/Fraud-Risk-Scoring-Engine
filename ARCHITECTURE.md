@@ -51,15 +51,25 @@ It is designed to demonstrate:
           ┌───────────────┼────────────────────┐
           ▼               ▼                    ▼
  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
- │ PostgreSQL     │  │ Redis Cache    │  │ Elasticsearch  │
- │ (durable store)│  │ (hot flags)    │  │ (search+audit) │
- └────────────────┘  └────────────────┘  └────────────────┘
-                          │
-                          ▼
-                  ┌────────────────┐
-                  │  Prometheus    │
-                  │  + Grafana     │
-                  └────────────────┘
+ │  Cassandra     │  │ Redis Cache    │  │ Elasticsearch  │
+ │ (high-throughput  │ (hot flags,   │  │ (search+audit) │
+ │  event + score │  │  real-time     │  └────────────────┘
+ │  durable store)│  │  lookups)      │
+ └────────────────┘  └────────────────┘
+          │
+          ▼
+ ┌────────────────┐
+ │  PostgreSQL    │
+ │  (API layer    │
+ │   queries via  │
+ │   Spring JPA)  │
+ └───────┬────────┘
+         │
+         ▼
+ ┌────────────────┐
+ │  Prometheus    │
+ │  + Grafana     │
+ └────────────────┘
 ```
 
 ---
@@ -109,26 +119,34 @@ Clear boundaries prevent incorrect assumptions and improve reasoning about failu
 
 ### D. Output Sinks
 
-Each sink has a clear, isolated purpose.
+Each sink has a clear, isolated purpose. No sink is used for more than one role.
 
-**PostgreSQL** — Durable record of:
-- Risk scores
-- Rule triggers
-- Run metadata
-- Supports idempotent upserts
+**Cassandra** — High-throughput durable store for:
+- Raw `transaction_events` (partitioned by `user_id`, clustered by `event_ts DESC`)
+- Computed `risk_scores` (partitioned by `event_id`)
+- Chosen because write throughput at 10K–500K events/sec is its primary design goal
+- Partition key design directly supports Phase 3 velocity detection (single-partition reads per user)
 
-**Redis** — Low-latency access to:
-- Recently flagged transactions
-- Top risky IPs/users
-- TTL-based cache layer
+**Redis** — Low-latency real-time access to:
+- Recently flagged transactions (TTL 24h)
+- Top risky IPs and users
+- Used by the authorization API for sub-5ms risk lookups at decision time
 
 **Elasticsearch** — Searchable audit trail:
-- For investigation and debugging
+- Full-text search for fraud investigation
+- Historical pattern analysis
+- Investigation UI queries
+
+**PostgreSQL** — Relational query layer for the API:
+- Managed by the `api/` module via Spring Data JPA
+- Stores aggregated or materialized views suitable for complex relational queries
+- Not written to directly by Flink — this boundary keeps the streaming layer and query layer decoupled
 
 **Boundary**
 - No cross-sink transactions
 - Each sink write is idempotent
 - Failures are isolated per sink
+- Flink writes to Cassandra, Redis, and Elasticsearch; the API owns PostgreSQL
 
 ### E. Observability Layer
 
