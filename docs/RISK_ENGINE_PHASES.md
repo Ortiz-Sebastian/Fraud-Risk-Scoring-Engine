@@ -152,20 +152,46 @@ docker exec -it cassandra cqlsh -e \
 
 ---
 
-### Phase 3 — Velocity Detection (5-min Sliding Window per `user_id`) ⬜ NOT STARTED
+### Phase 3 — Velocity Detection (5-min Sliding Window per `user_id`) ✅ COMPLETE
 
 **Goal:** Detect when a single user submits more than N transactions within a 5-minute window.
 This directly catches the `ATTACK` mode's velocity burst pattern (3 hardcoded user IDs
 firing at high rates).
 
-**What to build:**
-- Switch `WatermarkStrategy` from `noWatermarks()` to event-time watermarks based on `event_ts`,
+**What was built:**
+- `WatermarkStrategy` switched from `noWatermarks()` to event-time watermarks based on `event_ts`,
   with a bounded-out-of-orderness of 5 seconds
 - `keyBy(TransactionEvent::userId)` to partition the stream by user
-- A 5-minute sliding window (slide every 1 minute) that counts events per user per window
-- A `ProcessWindowFunction` or `AggregateFunction` that emits a `RiskScore` when the count
-  exceeds a configurable threshold (e.g. 10 transactions in 5 minutes)
-- Write the resulting `RiskScore` stream to a `risk_scores` Postgres table
+- A 5-minute sliding window (slide every 1 minute) using `SlidingEventTimeWindows`
+- `VelocityDetector.CountAggregator` — lightweight O(1) per-record accumulation (count + last event_id)
+- `VelocityDetector.WindowEvaluator` — post-window threshold check; emits `RiskScore` when triggered
+- Threshold is configurable via `VELOCITY_THRESHOLD` env var (default 10)
+- `RiskScore` stream written to `fraud_engine.risk_scores` Cassandra table
+
+**Why Cassandra (not PostgreSQL) for `risk_scores`:**
+Consistent with the architecture decision in `ARCHITECTURE.md`: Flink writes directly to
+Cassandra (high-throughput streaming sink); PostgreSQL is the API layer's responsibility
+and must not be written to by Flink directly. The `event_id` partition key makes re-scoring
+idempotent via Cassandra's last-write-wins semantics.
+
+**Files changed:**
+- `risk-engine/src/main/java/com/riskengine/engine/StreamingJob.java` — watermark strategy, velocity pipeline
+- `risk-engine/src/main/java/com/riskengine/engine/fraud/VelocityDetector.java` — new file
+- `risk-engine/src/main/java/com/riskengine/engine/sink/CassandraRiskScoreSink.java` — new file
+- `common/src/main/java/com/riskengine/common/config/AppConfig.java` — added `velocityThreshold()`
+
+**Cassandra table created automatically on startup:**
+```cql
+CREATE TABLE IF NOT EXISTS fraud_engine.risk_scores (
+    event_id     text,
+    risk_score   int,
+    flagged      boolean,
+    reasons      list<text>,
+    rule_version text,
+    scored_at    timestamp,
+    PRIMARY KEY (event_id)
+);
+```
 
 **Expected `RiskScore` output for a velocity hit:**
 ```json
@@ -176,6 +202,20 @@ firing at high rates).
   "reasons": ["USER_VELOCITY"],
   "rule_version": "v1.0"
 }
+```
+
+**How to verify:**
+```bash
+# Run in attack mode to trigger velocity bursts quickly
+make run-producer-attack
+
+# After ~5 minutes of attack traffic, query Cassandra:
+docker exec -it cassandra cqlsh -e \
+  "SELECT event_id, risk_score, flagged, reasons FROM fraud_engine.risk_scores LIMIT 20;"
+
+# Confirm USER_VELOCITY scores are present
+docker exec -it cassandra cqlsh -e \
+  "SELECT COUNT(*) FROM fraud_engine.risk_scores WHERE flagged = true ALLOW FILTERING;"
 ```
 
 ---
@@ -245,10 +285,20 @@ Catches the `ATTACK` mode's new-device attack pattern (fresh UUID device ID, $50
 ```
 risk-engine/
 └── src/main/java/com/riskengine/engine/
-    ├── StreamingJob.java                 ← Phase 1+2 ✅ — Flink env + Kafka source + Cassandra sink
-    ├── TransactionEventDeserializer.java ← Phase 1 ✅ — Jackson deserializer for TransactionEvent
+    ├── StreamingJob.java                        ← Phase 1+2+3 ✅ — Flink env, Kafka source, velocity pipeline
+    ├── TransactionEventDeserializer.java        ← Phase 1 ✅ — Jackson deserializer for TransactionEvent
+    ├── fraud/
+    │   └── VelocityDetector.java               ← Phase 3 ✅ — CountAggregator + WindowEvaluator
     └── sink/
-        └── CassandraTransactionSink.java ← Phase 2 ✅ — RichSinkFunction writing to Cassandra
+        ├── CassandraTransactionSink.java        ← Phase 2 ✅ — RichSinkFunction writing raw events
+        └── CassandraRiskScoreSink.java          ← Phase 3 ✅ — RichSinkFunction writing risk scores
+
+common/
+└── src/main/java/com/riskengine/common/
+    ├── config/AppConfig.java                   ← velocityThreshold() added in Phase 3
+    └── model/
+        ├── TransactionEvent.java
+        └── RiskScore.java
 ```
 
 As phases are completed, update this section with new files.
@@ -292,3 +342,4 @@ The `.env` file at the project root contains the defaults.
 | `ELASTICSEARCH_HOST` | `localhost` | Phase 7 |
 | `ELASTICSEARCH_PORT` | `9200` | Phase 7 |
 | `FLINK_CHECKPOINT_DIR` | `./checkpoint` | Phases 1–7 |
+| `VELOCITY_THRESHOLD` | `10` | Phase 3–7 |

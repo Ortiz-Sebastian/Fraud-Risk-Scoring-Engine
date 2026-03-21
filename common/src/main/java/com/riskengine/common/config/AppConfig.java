@@ -67,4 +67,12 @@ public final class AppConfig {
     public static String flinkCheckpointDir() {
         return get("FLINK_CHECKPOINT_DIR", "./checkpoint");
     }
+
+    /**
+     * Maximum number of transactions a single user_id may submit within a 5-minute
+     * sliding window before being flagged with USER_VELOCITY.
+     */
+    public static int velocityThreshold() {
+        return getInt("VELOCITY_THRESHOLD", 10);
+    }
 }

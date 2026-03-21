@@ -6,6 +6,23 @@ application {
     mainClass = 'com.riskengine.engine.StreamingJob'
 }
 
+// Flink's Kryo serializer (twitter-chill) reflects into java.util and java.lang internals.
+// Java 17+ module encapsulation blocks this by default. These flags must be applied to both
+// the run task and the test task since each forks its own JVM process.
+def flinkJvmArgs = [
+    '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+    '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+    '--add-opens', 'java.base/java.io=ALL-UNNAMED'
+]
+
+tasks.named('run') {
+    jvmArgs(flinkJvmArgs)
+}
+
+tasks.named('test') {
+    jvmArgs(flinkJvmArgs)
+}
+
 dependencies {
     implementation project(':common')
 
@@ -25,4 +42,6 @@ dependencies {
     implementation "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${jacksonVersion}"
     implementation "org.slf4j:slf4j-api:${slf4jVersion}"
     runtimeOnly "ch.qos.logback:logback-classic:${logbackVersion}"
+
+    testImplementation "org.assertj:assertj-core:${assertjVersion}"
 }
