@@ -83,4 +83,21 @@ public final class AppConfig {
     public static int ipBurstThreshold() {
         return getInt("IP_BURST_THRESHOLD", 5);
     }
+
+    /**
+     * Minimum transaction amount (in dollars) that triggers a NEW_DEVICE_HIGH_VALUE flag
+     * when seen on a device_id for the very first time.
+     */
+    public static int newDeviceAmountThreshold() {
+        return getInt("NEW_DEVICE_AMOUNT_THRESHOLD", 500);
+    }
+
+    /**
+     * Minutes of inactivity after which a device_id's "seen" state expires.
+     * Once expired, the next transaction from that device is treated as a first-time event.
+     * Acts as the session-inactivity gap for device profiling.
+     */
+    public static int deviceStateRetentionMinutes() {
+        return getInt("DEVICE_STATE_RETENTION_MINUTES", 1440);
+    }
 }

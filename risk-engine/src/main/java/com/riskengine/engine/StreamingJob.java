@@ -3,6 +3,7 @@ package com.riskengine.engine;
 import com.riskengine.common.config.AppConfig;
 import com.riskengine.common.model.RiskScore;
 import com.riskengine.common.model.TransactionEvent;
+import com.riskengine.engine.fraud.DeviceProfileDetector;
 import com.riskengine.engine.fraud.IpBurstDetector;
 import com.riskengine.engine.fraud.VelocityDetector;
 import com.riskengine.engine.sink.CassandraRiskScoreSink;
@@ -24,10 +25,11 @@ public class StreamingJob {
     private static final Logger log = LoggerFactory.getLogger(StreamingJob.class);
 
     public static void main(String[] args) throws Exception {
-        log.info("Risk Engine starting | kafka={} topic={} cassandra={}:{} velocityThreshold={} ipBurstThreshold={}",
+        log.info("Risk Engine starting | kafka={} topic={} cassandra={}:{} velocityThreshold={} ipBurstThreshold={} newDeviceAmountThreshold={} deviceStateRetentionMin={}",
                 AppConfig.kafkaBootstrapServers(), AppConfig.kafkaTopic(),
                 AppConfig.cassandraHost(), AppConfig.cassandraPort(),
-                AppConfig.velocityThreshold(), AppConfig.ipBurstThreshold());
+                AppConfig.velocityThreshold(), AppConfig.ipBurstThreshold(),
+                AppConfig.newDeviceAmountThreshold(), AppConfig.deviceStateRetentionMinutes());
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(60_000);
@@ -77,9 +79,18 @@ public class StreamingJob {
                 .aggregate(new IpBurstDetector.DistinctUserAggregator(), new IpBurstDetector.WindowEvaluator())
                 .name("IP Burst Detection [2m window / 30s slide]");
 
+        // ── Phase 5: device profiling ─────────────────────────────────────
+        // Stateful per-device_id check: flags the first-ever transaction from a new
+        // device when the amount exceeds the threshold. State TTL acts as a session
+        // inactivity gap — dormant devices are eventually forgotten and re-flaggable.
+        DataStream<RiskScore> deviceScores = events
+                .keyBy(TransactionEvent::deviceId)
+                .process(new DeviceProfileDetector.NewDeviceFunction())
+                .name("Device Profile Detection [new device + large purchase]");
+
         // Merge all rule outputs into a single stream before sinking.
         // union() is a Flink primitive that merges streams without any shuffle or re-keying.
-        velocityScores.union(ipBurstScores)
+        velocityScores.union(ipBurstScores, deviceScores)
                       .addSink(new CassandraRiskScoreSink())
                       .name("Cassandra Risk Score Sink");
 

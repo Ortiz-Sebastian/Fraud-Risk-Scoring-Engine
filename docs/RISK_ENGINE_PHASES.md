@@ -271,17 +271,53 @@ docker exec -it cassandra cqlsh -e \
 
 ---
 
-### Phase 5 — Device Profiling (New Device + Large Purchase) ⬜ NOT STARTED
+### Phase 5 — Device Profiling (New Device + Large Purchase) ✅ COMPLETE
 
 **Goal:** Flag when a brand-new device ID immediately makes a large purchase.
 Catches the `ATTACK` mode's new-device attack pattern (fresh UUID device ID, $500–$3000 purchase).
 
-**What to build:**
-- Stateful `KeyedProcessFunction` keyed by `device_id`
-- `ValueState<Boolean>` tracking whether this device has been seen before
-- On first event: store device ID in state and record the amount
-- If the first-ever transaction for a device exceeds a threshold (e.g. $500), emit a flag
-- Session window with inactivity timeout to eventually clear state for dormant devices
+**What was built:**
+- `DeviceProfileDetector.NewDeviceFunction` — a `KeyedProcessFunction<String, TransactionEvent, RiskScore>`
+  keyed by `device_id` that tracks whether a device has been seen before using `ValueState<Boolean>`
+- On the first-ever event for a device: if the amount is ≥ the threshold (default $500), emits
+  a flagged `RiskScore` with reason `NEW_DEVICE_HIGH_VALUE` and risk score 85
+- State is configured with `StateTtlConfig` using `OnReadAndWrite` update type — the TTL is
+  refreshed on every event, acting as a session-inactivity gap. Dormant devices are eventually
+  forgotten and become re-flaggable.
+- Threshold is configurable via `NEW_DEVICE_AMOUNT_THRESHOLD` env var (default 500)
+- State retention is configurable via `DEVICE_STATE_RETENTION_MINUTES` env var (default 1440 = 24 hours)
+- Device score stream is merged with velocity and IP burst scores via `union()` before the single
+  `CassandraRiskScoreSink`
+
+**Files changed:**
+- `risk-engine/src/main/java/com/riskengine/engine/StreamingJob.java` — device profiling pipeline branch, union of three score streams
+- `risk-engine/src/main/java/com/riskengine/engine/fraud/DeviceProfileDetector.java` — new file
+- `common/src/main/java/com/riskengine/common/config/AppConfig.java` — added `newDeviceAmountThreshold()`, `deviceStateRetentionMinutes()`
+
+**Expected `RiskScore` output for a new-device high-value hit:**
+```json
+{
+  "event_id": "<event_id>",
+  "risk_score": 85,
+  "flagged": true,
+  "reasons": ["NEW_DEVICE_HIGH_VALUE"],
+  "rule_version": "v1.0"
+}
+```
+
+**How to verify:**
+```bash
+# Run in attack mode to trigger new-device attacks quickly
+make run-producer-attack
+
+# After a few seconds, query Cassandra:
+docker exec -it cassandra cqlsh -e \
+  "SELECT event_id, risk_score, flagged, reasons FROM fraud_engine.risk_scores LIMIT 20;"
+
+# Confirm NEW_DEVICE_HIGH_VALUE scores are present
+docker exec -it cassandra cqlsh -e \
+  "SELECT COUNT(*) FROM fraud_engine.risk_scores WHERE flagged = true ALLOW FILTERING;"
+```
 
 ---
 
@@ -318,18 +354,19 @@ Catches the `ATTACK` mode's new-device attack pattern (fresh UUID device ID, $50
 ```
 risk-engine/
 └── src/main/java/com/riskengine/engine/
-    ├── StreamingJob.java                        ← Phase 1+2+3+4 ✅ — Flink env, Kafka source, velocity + IP burst pipelines
+    ├── StreamingJob.java                        ← Phase 1+2+3+4+5 ✅ — Flink env, Kafka source, velocity + IP burst + device profiling pipelines
     ├── TransactionEventDeserializer.java        ← Phase 1 ✅ — Jackson deserializer for TransactionEvent
     ├── fraud/
     │   ├── VelocityDetector.java               ← Phase 3 ✅ — CountAggregator + WindowEvaluator
-    │   └── IpBurstDetector.java                ← Phase 4 ✅ — DistinctUserAggregator + WindowEvaluator
+    │   ├── IpBurstDetector.java                ← Phase 4 ✅ — DistinctUserAggregator + WindowEvaluator
+    │   └── DeviceProfileDetector.java          ← Phase 5 ✅ — NewDeviceFunction (KeyedProcessFunction + StateTtlConfig)
     └── sink/
         ├── CassandraTransactionSink.java        ← Phase 2 ✅ — RichSinkFunction writing raw events
         └── CassandraRiskScoreSink.java          ← Phase 3 ✅ — RichSinkFunction writing risk scores
 
 common/
 └── src/main/java/com/riskengine/common/
-    ├── config/AppConfig.java                   ← velocityThreshold() (Phase 3), ipBurstThreshold() (Phase 4)
+    ├── config/AppConfig.java                   ← velocityThreshold() (Phase 3), ipBurstThreshold() (Phase 4), newDeviceAmountThreshold() + deviceStateRetentionMinutes() (Phase 5)
     └── model/
         ├── TransactionEvent.java
         └── RiskScore.java
@@ -378,3 +415,5 @@ The `.env` file at the project root contains the defaults.
 | `FLINK_CHECKPOINT_DIR` | `./checkpoint` | Phases 1–7 |
 | `VELOCITY_THRESHOLD` | `10` | Phase 3–7 |
 | `IP_BURST_THRESHOLD` | `5` | Phase 4–7 |
+| `NEW_DEVICE_AMOUNT_THRESHOLD` | `500` | Phase 5–7 |
+| `DEVICE_STATE_RETENTION_MINUTES` | `1440` | Phase 5–7 |
