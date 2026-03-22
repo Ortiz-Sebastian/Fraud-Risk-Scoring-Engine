@@ -3,6 +3,7 @@ package com.riskengine.engine;
 import com.riskengine.common.config.AppConfig;
 import com.riskengine.common.model.RiskScore;
 import com.riskengine.common.model.TransactionEvent;
+import com.riskengine.engine.fraud.IpBurstDetector;
 import com.riskengine.engine.fraud.VelocityDetector;
 import com.riskengine.engine.sink.CassandraRiskScoreSink;
 import com.riskengine.engine.sink.CassandraTransactionSink;
@@ -23,10 +24,10 @@ public class StreamingJob {
     private static final Logger log = LoggerFactory.getLogger(StreamingJob.class);
 
     public static void main(String[] args) throws Exception {
-        log.info("Risk Engine starting | kafka={} topic={} cassandra={}:{} velocityThreshold={}",
+        log.info("Risk Engine starting | kafka={} topic={} cassandra={}:{} velocityThreshold={} ipBurstThreshold={}",
                 AppConfig.kafkaBootstrapServers(), AppConfig.kafkaTopic(),
                 AppConfig.cassandraHost(), AppConfig.cassandraPort(),
-                AppConfig.velocityThreshold());
+                AppConfig.velocityThreshold(), AppConfig.ipBurstThreshold());
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(60_000);
@@ -67,7 +68,19 @@ public class StreamingJob {
                 .aggregate(new VelocityDetector.CountAggregator(), new VelocityDetector.WindowEvaluator())
                 .name("Velocity Detection [5m window / 1m slide]");
 
-        velocityScores.addSink(new CassandraRiskScoreSink())
+        // ── Phase 4: IP burst detection ───────────────────────────────────────
+        // 2-minute sliding window, advancing every 30 seconds, keyed per IP.
+        // A RiskScore is emitted when the number of distinct users on an IP exceeds the threshold.
+        DataStream<RiskScore> ipBurstScores = events
+                .keyBy(TransactionEvent::ip)
+                .window(SlidingEventTimeWindows.of(Time.minutes(2), Time.seconds(30)))
+                .aggregate(new IpBurstDetector.DistinctUserAggregator(), new IpBurstDetector.WindowEvaluator())
+                .name("IP Burst Detection [2m window / 30s slide]");
+
+        // Merge all rule outputs into a single stream before sinking.
+        // union() is a Flink primitive that merges streams without any shuffle or re-keying.
+        velocityScores.union(ipBurstScores)
+                      .addSink(new CassandraRiskScoreSink())
                       .name("Cassandra Risk Score Sink");
 
         env.execute("Fraud Risk Engine");

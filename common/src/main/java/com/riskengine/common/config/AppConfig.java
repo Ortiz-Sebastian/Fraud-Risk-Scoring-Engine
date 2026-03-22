@@ -75,4 +75,12 @@ public final class AppConfig {
     public static int velocityThreshold() {
         return getInt("VELOCITY_THRESHOLD", 10);
     }
+
+    /**
+     * Maximum number of distinct user_ids that may transact from a single IP address
+     * within a 2-minute sliding window before being flagged with IP_BURST.
+     */
+    public static int ipBurstThreshold() {
+        return getInt("IP_BURST_THRESHOLD", 5);
+    }
 }

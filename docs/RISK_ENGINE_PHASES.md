@@ -220,21 +220,54 @@ docker exec -it cassandra cqlsh -e \
 
 ---
 
-### Phase 4 — IP Burst Detection (2-min Sliding Window per IP) ⬜ NOT STARTED
+### Phase 4 — IP Burst Detection (2-min Sliding Window per IP) ✅ COMPLETE
 
 **Goal:** Detect when multiple distinct users transact from the same IP address within
 2 minutes. Catches the `ATTACK` mode's IP burst pattern (3 hardcoded "hot" IPs routing
 normal users' traffic).
 
-**What to build:**
-- A second keyed stream: `keyBy(TransactionEvent::ip)`
+**What was built:**
+- A second keyed stream: `keyBy(TransactionEvent::ip)` in `StreamingJob`
 - A 2-minute sliding window (slide every 30 seconds) counting distinct `user_id` values per IP
-- Emit a `RiskScore` when distinct user count exceeds threshold (e.g. 5 distinct users in 2 minutes)
-- Merge this output stream with the velocity detection output stream
+- `IpBurstDetector.IpBurstAccumulator` — maintains a `HashSet<String>` of distinct user IDs
+  and the last event_id seen in the window
+- `IpBurstDetector.DistinctUserAggregator` — `AggregateFunction` that adds user_ids to the set
+  and tracks the last event_id per record
+- `IpBurstDetector.WindowEvaluator` — post-window threshold check; emits `RiskScore` when the
+  number of distinct users exceeds the threshold
+- Threshold is configurable via `IP_BURST_THRESHOLD` env var (default 5)
+- IP burst `RiskScore` stream is merged with velocity scores via `union()` before a single
+  `CassandraRiskScoreSink`
 
-**Note on state:** counting *distinct* values in a window requires maintaining a `Set<String>`
-of user IDs in `ListState` or using a `HashSet` in a `ProcessWindowFunction`. It is not
-a simple counter — plan accordingly.
+**Files changed:**
+- `risk-engine/src/main/java/com/riskengine/engine/StreamingJob.java` — IP burst pipeline, union of score streams
+- `risk-engine/src/main/java/com/riskengine/engine/fraud/IpBurstDetector.java` — new file
+- `common/src/main/java/com/riskengine/common/config/AppConfig.java` — added `ipBurstThreshold()`
+
+**Expected `RiskScore` output for an IP burst hit:**
+```json
+{
+  "event_id": "<last event_id in window>",
+  "risk_score": 80,
+  "flagged": true,
+  "reasons": ["IP_BURST"],
+  "rule_version": "v1.0"
+}
+```
+
+**How to verify:**
+```bash
+# Run in attack mode to trigger IP bursts quickly
+make run-producer-attack
+
+# After ~2 minutes of attack traffic, query Cassandra:
+docker exec -it cassandra cqlsh -e \
+  "SELECT event_id, risk_score, flagged, reasons FROM fraud_engine.risk_scores LIMIT 20;"
+
+# Confirm IP_BURST scores are present
+docker exec -it cassandra cqlsh -e \
+  "SELECT COUNT(*) FROM fraud_engine.risk_scores WHERE flagged = true ALLOW FILTERING;"
+```
 
 ---
 
@@ -285,17 +318,18 @@ Catches the `ATTACK` mode's new-device attack pattern (fresh UUID device ID, $50
 ```
 risk-engine/
 └── src/main/java/com/riskengine/engine/
-    ├── StreamingJob.java                        ← Phase 1+2+3 ✅ — Flink env, Kafka source, velocity pipeline
+    ├── StreamingJob.java                        ← Phase 1+2+3+4 ✅ — Flink env, Kafka source, velocity + IP burst pipelines
     ├── TransactionEventDeserializer.java        ← Phase 1 ✅ — Jackson deserializer for TransactionEvent
     ├── fraud/
-    │   └── VelocityDetector.java               ← Phase 3 ✅ — CountAggregator + WindowEvaluator
+    │   ├── VelocityDetector.java               ← Phase 3 ✅ — CountAggregator + WindowEvaluator
+    │   └── IpBurstDetector.java                ← Phase 4 ✅ — DistinctUserAggregator + WindowEvaluator
     └── sink/
         ├── CassandraTransactionSink.java        ← Phase 2 ✅ — RichSinkFunction writing raw events
         └── CassandraRiskScoreSink.java          ← Phase 3 ✅ — RichSinkFunction writing risk scores
 
 common/
 └── src/main/java/com/riskengine/common/
-    ├── config/AppConfig.java                   ← velocityThreshold() added in Phase 3
+    ├── config/AppConfig.java                   ← velocityThreshold() (Phase 3), ipBurstThreshold() (Phase 4)
     └── model/
         ├── TransactionEvent.java
         └── RiskScore.java
@@ -343,3 +377,4 @@ The `.env` file at the project root contains the defaults.
 | `ELASTICSEARCH_PORT` | `9200` | Phase 7 |
 | `FLINK_CHECKPOINT_DIR` | `./checkpoint` | Phases 1–7 |
 | `VELOCITY_THRESHOLD` | `10` | Phase 3–7 |
+| `IP_BURST_THRESHOLD` | `5` | Phase 4–7 |
