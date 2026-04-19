@@ -321,16 +321,26 @@ docker exec -it cassandra cqlsh -e \
 
 ---
 
-### Phase 6 — Deduplication + Watermarking ⬜ NOT STARTED
+### Phase 6 — Deduplication + Watermarking ✅ COMPLETE
 
 **Goal:** Harden the pipeline against duplicate events and late-arriving records.
 
-**What to build:**
-- Deduplication by `event_id` using Flink's `KeyedProcessFunction` with `ValueState<Boolean>`
-  and a TTL (e.g. 1 hour) to bound state size
-- Tune `WatermarkStrategy` with appropriate `forBoundedOutOfOrderness` duration
-- A side output for events that arrive after the watermark has passed (late events)
-  — log them or write to a `late_events` table for analysis
+**Implemented:**
+- Added `EventDeduplicationFunction` (`KeyedProcessFunction`) keyed by `event_id` with
+  `ValueState<Boolean>` + TTL to drop duplicate events while bounding state size.
+- Added `LateEventRouterFunction` (`ProcessFunction`) that compares `event_ts` against
+  current watermark and routes late records to a side output.
+- Updated `StreamingJob` to:
+  - tune watermark out-of-orderness from config (`WATERMARK_OUT_OF_ORDERNESS_SECONDS`, default 10)
+  - split late events via side output
+  - deduplicate on-time events before all downstream sinks/rules
+- Added `CassandraLateEventSink` writing late records to `fraud_engine.late_events`.
+- Added config knobs in `AppConfig`:
+  - `DEDUP_STATE_RETENTION_MINUTES` (default 60)
+  - `WATERMARK_OUT_OF_ORDERNESS_SECONDS` (default 10)
+- Added integration test `PreprocessingPipelineTest` covering:
+  - duplicate suppression
+  - late-event routing behavior
 
 ---
 
@@ -354,15 +364,19 @@ docker exec -it cassandra cqlsh -e \
 ```
 risk-engine/
 └── src/main/java/com/riskengine/engine/
-    ├── StreamingJob.java                        ← Phase 1+2+3+4+5 ✅ — Flink env, Kafka source, velocity + IP burst + device profiling pipelines
+    ├── StreamingJob.java                        ← Phase 1+2+3+4+5+6 ✅ — Flink env, Kafka source, watermark routing, dedup, velocity + IP burst + device profiling pipelines
     ├── TransactionEventDeserializer.java        ← Phase 1 ✅ — Jackson deserializer for TransactionEvent
     ├── fraud/
     │   ├── VelocityDetector.java               ← Phase 3 ✅ — CountAggregator + WindowEvaluator
     │   ├── IpBurstDetector.java                ← Phase 4 ✅ — DistinctUserAggregator + WindowEvaluator
     │   └── DeviceProfileDetector.java          ← Phase 5 ✅ — NewDeviceFunction (KeyedProcessFunction + StateTtlConfig)
+    ├── preprocess/
+    │   ├── EventDeduplicationFunction.java      ← Phase 6 ✅ — KeyedProcessFunction(event_id) + TTL state
+    │   └── LateEventRouterFunction.java         ← Phase 6 ✅ — watermark-based late-event side output router
     └── sink/
         ├── CassandraTransactionSink.java        ← Phase 2 ✅ — RichSinkFunction writing raw events
-        └── CassandraRiskScoreSink.java          ← Phase 3 ✅ — RichSinkFunction writing risk scores
+        ├── CassandraRiskScoreSink.java          ← Phase 3 ✅ — RichSinkFunction writing risk scores
+        └── CassandraLateEventSink.java          ← Phase 6 ✅ — RichSinkFunction writing late events
 
 common/
 └── src/main/java/com/riskengine/common/
@@ -417,3 +431,5 @@ The `.env` file at the project root contains the defaults.
 | `IP_BURST_THRESHOLD` | `5` | Phase 4–7 |
 | `NEW_DEVICE_AMOUNT_THRESHOLD` | `500` | Phase 5–7 |
 | `DEVICE_STATE_RETENTION_MINUTES` | `1440` | Phase 5–7 |
+| `DEDUP_STATE_RETENTION_MINUTES` | `60` | Phase 6–7 |
+| `WATERMARK_OUT_OF_ORDERNESS_SECONDS` | `10` | Phase 6–7 |

@@ -100,4 +100,20 @@ public final class AppConfig {
     public static int deviceStateRetentionMinutes() {
         return getInt("DEVICE_STATE_RETENTION_MINUTES", 1440);
     }
+
+    /**
+     * Minutes to retain seen event_id entries for stream deduplication.
+     * Bounds ValueState size used by event deduplication.
+     */
+    public static int dedupStateRetentionMinutes() {
+        return getInt("DEDUP_STATE_RETENTION_MINUTES", 60);
+    }
+
+    /**
+     * Allowed event-time lateness (out-of-orderness) used by WatermarkStrategy.
+     * Events older than the current watermark are routed to a late-event side output.
+     */
+    public static int watermarkOutOfOrdernessSeconds() {
+        return getInt("WATERMARK_OUT_OF_ORDERNESS_SECONDS", 10);
+    }
 }

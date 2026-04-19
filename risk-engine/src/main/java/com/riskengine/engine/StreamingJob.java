@@ -6,15 +6,20 @@ import com.riskengine.common.model.TransactionEvent;
 import com.riskengine.engine.fraud.DeviceProfileDetector;
 import com.riskengine.engine.fraud.IpBurstDetector;
 import com.riskengine.engine.fraud.VelocityDetector;
+import com.riskengine.engine.preprocess.EventDeduplicationFunction;
+import com.riskengine.engine.preprocess.LateEventRouterFunction;
+import com.riskengine.engine.sink.CassandraLateEventSink;
 import com.riskengine.engine.sink.CassandraRiskScoreSink;
 import com.riskengine.engine.sink.CassandraTransactionSink;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.util.OutputTag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,6 +28,8 @@ import java.time.Duration;
 public class StreamingJob {
 
     private static final Logger log = LoggerFactory.getLogger(StreamingJob.class);
+    private static final OutputTag<TransactionEvent> LATE_EVENTS_TAG =
+            new OutputTag<>("late-events") {};
 
     public static void main(String[] args) throws Exception {
         log.info("Risk Engine starting | kafka={} topic={} cassandra={}:{} velocityThreshold={} ipBurstThreshold={} newDeviceAmountThreshold={} deviceStateRetentionMin={}",
@@ -42,20 +49,42 @@ public class StreamingJob {
                 .setValueOnlyDeserializer(new TransactionEventDeserializer())
                 .build();
 
-        // Event-time watermarks with 5-second bounded out-of-orderness.
+        int watermarkOutOfOrdernessSec = AppConfig.watermarkOutOfOrdernessSeconds();
+        int dedupRetentionMin = AppConfig.dedupStateRetentionMinutes();
+
+        // Event-time watermarks with bounded out-of-orderness.
         // withIdleness is required whenever Flink parallelism exceeds the number of Kafka partitions
         // (the default case in local mode). Idle subtasks that receive no partition assignment would
         // otherwise hold the global watermark at -∞ indefinitely, preventing all windows from firing.
         WatermarkStrategy<TransactionEvent> watermarkStrategy =
-                WatermarkStrategy.<TransactionEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
+                WatermarkStrategy.<TransactionEvent>forBoundedOutOfOrderness(Duration.ofSeconds(watermarkOutOfOrdernessSec))
                         .withTimestampAssigner((event, recordTs) -> event.eventTs().toEpochMilli())
-                        .withIdleness(Duration.ofSeconds(10));
+                        .withIdleness(Duration.ofSeconds(Math.max(10, watermarkOutOfOrdernessSec * 2L)));
 
-        DataStream<TransactionEvent> events = env.fromSource(
+        DataStream<TransactionEvent> sourceEvents = env.fromSource(
                 kafkaSource,
                 watermarkStrategy,
                 "Transaction Kafka Source"
         );
+
+        // ── Phase 6: watermark-based late-event routing + event_id dedup ──────────────────
+        SingleOutputStreamOperator<TransactionEvent> onTimeEvents = sourceEvents
+                .process(new LateEventRouterFunction(LATE_EVENTS_TAG))
+                .name("Late Event Router [event_ts vs watermark]");
+
+        DataStream<TransactionEvent> lateEvents = onTimeEvents.getSideOutput(LATE_EVENTS_TAG);
+
+        lateEvents
+                .addSink(new CassandraLateEventSink())
+                .name("Cassandra Late Events Sink");
+
+        DataStream<TransactionEvent> events = onTimeEvents
+                .keyBy(TransactionEvent::eventId)
+                .process(new EventDeduplicationFunction(dedupRetentionMin))
+                .name("Event Deduplication [event_id + TTL]");
+
+        log.info("Phase 6 active | watermarkOutOfOrdernessSec={} dedupRetentionMin={}",
+                watermarkOutOfOrdernessSec, dedupRetentionMin);
 
         // ── Phase 2: raw event pass-through ───────────────────────────────────
         events.addSink(new CassandraTransactionSink())
