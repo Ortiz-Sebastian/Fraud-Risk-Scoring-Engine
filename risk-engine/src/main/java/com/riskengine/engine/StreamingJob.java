@@ -11,6 +11,9 @@ import com.riskengine.engine.preprocess.LateEventRouterFunction;
 import com.riskengine.engine.sink.CassandraLateEventSink;
 import com.riskengine.engine.sink.CassandraRiskScoreSink;
 import com.riskengine.engine.sink.CassandraTransactionSink;
+import com.riskengine.engine.sink.ElasticsearchRiskScoreSink;
+import com.riskengine.engine.sink.PostgresRiskScoreSink;
+import com.riskengine.engine.sink.RedisRiskScoreSink;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -117,11 +120,18 @@ public class StreamingJob {
                 .process(new DeviceProfileDetector.NewDeviceFunction())
                 .name("Device Profile Detection [new device + large purchase]");
 
-        // Merge all rule outputs into a single stream before sinking.
+        // Merge all rule outputs into a single stream, then fan out to every sink (Phase 7).
         // union() is a Flink primitive that merges streams without any shuffle or re-keying.
-        velocityScores.union(ipBurstScores, deviceScores)
-                      .addSink(new CassandraRiskScoreSink())
-                      .name("Cassandra Risk Score Sink");
+        DataStream<RiskScore> riskScores = velocityScores.union(ipBurstScores, deviceScores);
+
+        riskScores.addSink(new CassandraRiskScoreSink())
+                  .name("Cassandra Risk Score Sink");
+        riskScores.addSink(new PostgresRiskScoreSink())
+                  .name("PostgreSQL Risk Score Sink");
+        riskScores.addSink(new RedisRiskScoreSink())
+                  .name("Redis Risk Score Sink");
+        riskScores.addSink(new ElasticsearchRiskScoreSink())
+                  .name("Elasticsearch Risk Score Sink");
 
         env.execute("Fraud Risk Engine");
     }

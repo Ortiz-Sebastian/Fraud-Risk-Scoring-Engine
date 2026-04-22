@@ -52,6 +52,20 @@ public final class AppConfig {
         return "http://" + host + ":" + port;
     }
 
+    /**
+     * Elasticsearch index for {@code RiskScore} documents written by the Flink job.
+     */
+    public static String elasticsearchRiskScoresIndex() {
+        return get("ELASTICSEARCH_RISK_SCORES_INDEX", "risk-scores");
+    }
+
+    /**
+     * TTL (seconds) for Redis keys under {@code fraud:flagged:<event_id>}.
+     */
+    public static int redisRiskScoreTtlSeconds() {
+        return getInt("REDIS_RISK_SCORE_TTL_SECONDS", 86_400);
+    }
+
     public static String cassandraHost() {
         return get("CASSANDRA_HOST", "localhost");
     }
