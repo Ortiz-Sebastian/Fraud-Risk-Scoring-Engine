@@ -344,9 +344,9 @@ docker exec -it cassandra cqlsh -e \
 
 ---
 
-### Phase 7 — Multi-Sink (PostgreSQL + Redis + Elasticsearch) ⬜ NOT STARTED
-
+### Phase 7 — Multi-Sink (PostgreSQL + Redis + Elasticsearch)  Done 
 **Goal:** Fan out `RiskScore` results to all three sinks simultaneously.
+
 
 **What to build:**
 - Use Flink's `split` or multiple `addSink` calls on the `DataStream<RiskScore>` output stream
