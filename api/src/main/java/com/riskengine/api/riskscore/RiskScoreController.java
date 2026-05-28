@@ -1,10 +1,12 @@
 package com.riskengine.api.riskscore;
 
-import org.springframework.data.domain.Pageable;
+import java.time.Instant;
+import java.util.List;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -19,13 +21,24 @@ public class RiskScoreController {
     }
 
     /**
-     * Paginated list. Uses Spring {@link Pageable} ({@code page}, {@code size}, optional {@code sort}).
+     * Paginated list with optional filters and sorting.
      */
     @GetMapping
     public PagedRiskScoresResponse list(
-        @PageableDefault(size = 20, sort = "scoredAt", direction = Sort.Direction.DESC) Pageable pageable
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size,
+        @RequestParam(required = false) Instant from,
+        @RequestParam(required = false) Instant to,
+        @RequestParam(required = false) Boolean flagged,
+        @RequestParam(required = false) Integer minScore,
+        @RequestParam(required = false) Integer maxScore,
+        @RequestParam(required = false) List<String> reason,
+        @RequestParam(required = false) String sort,
+        @RequestParam(defaultValue = "desc") String order
     ) {
-        return riskScoreService.list(pageable);
+        Sort.Direction direction = Sort.Direction.fromString(order);
+        PageRequest pageable = PageRequest.of(page, size, buildSort(sort, direction));
+        return riskScoreService.list(pageable, from, to, flagged, minScore, maxScore, reason);
     }
 
     @GetMapping("/{eventId}")
@@ -33,5 +46,16 @@ public class RiskScoreController {
         return riskScoreService
             .findByEventId(eventId)
             .orElseThrow(() -> new RiskScoreNotFoundException(eventId));
+    }
+
+    private Sort buildSort(String sort, Sort.Direction direction) {
+        if (sort == null || sort.isBlank()) {
+            return Sort.by(direction, "scoredAt");
+        }
+        String normalized = sort.trim();
+        if (!normalized.equals("scoredAt") && !normalized.equals("riskScore")) {
+            throw new IllegalArgumentException("Unsupported sort field: " + sort);
+        }
+        return Sort.by(direction, normalized);
     }
 }

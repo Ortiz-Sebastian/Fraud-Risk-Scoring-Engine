@@ -2,6 +2,7 @@ package com.riskengine.api.riskscore;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -10,7 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import org.springframework.data.domain.Pageable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -60,7 +60,7 @@ class RiskScoreControllerTest {
                 true,
                 true
             );
-        when(riskScoreService.list(any(Pageable.class))).thenReturn(page);
+        when(riskScoreService.list(any(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull())).thenReturn(page);
 
         mockMvc
             .perform(get("/api/v1/risk-scores"))
@@ -73,6 +73,17 @@ class RiskScoreControllerTest {
             .andExpect(jsonPath("$.total_pages").value(1))
             .andExpect(jsonPath("$.first").value(true))
             .andExpect(jsonPath("$.last").value(true));
+    }
+
+    @Test
+    void list_returns400_whenInvalidRange() throws Exception {
+        when(riskScoreService.list(any(), any(), any(), isNull(), isNull(), isNull(), isNull()))
+            .thenThrow(new IllegalArgumentException("Invalid scored_at range: 'from' must be before or equal to 'to'"));
+
+        mockMvc
+            .perform(get("/api/v1/risk-scores?from=2026-05-02T00:00:00Z&to=2026-05-01T00:00:00Z"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("bad_request"));
     }
 
     @Test
