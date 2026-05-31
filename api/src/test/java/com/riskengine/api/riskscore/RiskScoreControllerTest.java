@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -84,6 +85,50 @@ class RiskScoreControllerTest {
             .perform(get("/api/v1/risk-scores?from=2026-05-02T00:00:00Z&to=2026-05-01T00:00:00Z"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("bad_request"));
+    }
+
+    @Test
+    void getLiveByEventId_returnsRedisSource_whenPresent() throws Exception {
+        Instant scoredAt = Instant.parse("2026-05-01T12:00:00Z");
+        LiveRiskScoreResponse body =
+            LiveRiskScoreResponse.fromRedis("evt-live", 77, true, List.of("velocity"), "v1", scoredAt);
+        when(riskScoreService.findLiveByEventId(eq("evt-live")))
+            .thenReturn(Optional.of(new LiveRiskScoreLookupResult(body, false)));
+
+        mockMvc
+            .perform(get("/api/v1/risk-scores/evt-live/live"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.event_id").value("evt-live"))
+            .andExpect(jsonPath("$.risk_score").value(77))
+            .andExpect(jsonPath("$.source").value("REDIS"))
+            .andExpect(header().doesNotExist("X-Cache-Status"));
+    }
+
+    @Test
+    void getLiveByEventId_returnsPostgresSource_withBypassHeader_whenRedisDown() throws Exception {
+        Instant scoredAt = Instant.parse("2026-05-01T12:00:00Z");
+        LiveRiskScoreResponse body =
+            LiveRiskScoreResponse.fromPostgres(
+                new RiskScoreResponse("evt-pg", 60, true, List.of("amount"), "v1", scoredAt)
+            );
+        when(riskScoreService.findLiveByEventId(eq("evt-pg")))
+            .thenReturn(Optional.of(new LiveRiskScoreLookupResult(body, true)));
+
+        mockMvc
+            .perform(get("/api/v1/risk-scores/evt-pg/live"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.source").value("POSTGRES"))
+            .andExpect(header().string("X-Cache-Status", "BYPASS"));
+    }
+
+    @Test
+    void getLiveByEventId_returns404_whenMissing() throws Exception {
+        when(riskScoreService.findLiveByEventId(eq("missing-live"))).thenReturn(Optional.empty());
+
+        mockMvc
+            .perform(get("/api/v1/risk-scores/missing-live/live"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error").value("not_found"));
     }
 
     @Test

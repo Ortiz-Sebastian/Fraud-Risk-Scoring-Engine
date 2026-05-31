@@ -1,11 +1,14 @@
 package com.riskengine.api.riskscore;
 
 import com.riskengine.api.persistence.RiskScoreEntity;
+import com.riskengine.api.riskscore.redis.RiskScoreRedisRepository;
 import jakarta.persistence.criteria.Predicate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -17,15 +20,47 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RiskScoreService {
 
-    private final RiskScoreRepository repository;
+    private static final Logger log = LoggerFactory.getLogger(RiskScoreService.class);
 
-    public RiskScoreService(RiskScoreRepository repository) {
+    private final RiskScoreRepository repository;
+    private final RiskScoreRedisRepository redisRepository;
+
+    public RiskScoreService(RiskScoreRepository repository, RiskScoreRedisRepository redisRepository) {
         this.repository = repository;
+        this.redisRepository = redisRepository;
     }
 
     @Transactional(readOnly = true)
     public Optional<RiskScoreResponse> findByEventId(String eventId) {
         return repository.findById(eventId).map(RiskScoreResponse::from);
+    }
+
+    /**
+     * Redis-first lookup with PostgreSQL fallback. When Redis is unavailable, degrades to PG-only
+     * and marks the result for {@code X-Cache-Status: BYPASS}.
+     */
+    public Optional<LiveRiskScoreLookupResult> findLiveByEventId(String eventId) {
+        boolean cacheBypass = false;
+
+        try {
+            Optional<LiveRiskScoreResponse> fromRedis = redisRepository.findByEventId(eventId);
+            if (fromRedis.isPresent()) {
+                return Optional.of(new LiveRiskScoreLookupResult(fromRedis.get(), false));
+            }
+        } catch (Exception ex) {
+            log.warn("Redis lookup failed, degrading to PostgreSQL | eventId={}", eventId, ex);
+            cacheBypass = true;
+        }
+
+        final boolean bypass = cacheBypass;
+        return findByEventId(eventId)
+            .map(
+                pg ->
+                    new LiveRiskScoreLookupResult(
+                        LiveRiskScoreResponse.fromPostgres(pg),
+                        bypass
+                    )
+            );
     }
 
     /**

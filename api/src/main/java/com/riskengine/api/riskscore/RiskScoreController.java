@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -39,6 +40,20 @@ public class RiskScoreController {
         Sort.Direction direction = Sort.Direction.fromString(order);
         PageRequest pageable = PageRequest.of(page, size, buildSort(sort, direction));
         return riskScoreService.list(pageable, from, to, flagged, minScore, maxScore, reason);
+    }
+
+    @GetMapping("/{eventId}/live")
+    public ResponseEntity<LiveRiskScoreResponse> getLiveByEventId(@PathVariable String eventId) {
+        LiveRiskScoreLookupResult result =
+            riskScoreService
+                .findLiveByEventId(eventId)
+                .orElseThrow(() -> new RiskScoreNotFoundException(eventId));
+
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok();
+        if (result.cacheBypass()) {
+            response.header("X-Cache-Status", "BYPASS");
+        }
+        return response.body(result.response());
     }
 
     @GetMapping("/{eventId}")
